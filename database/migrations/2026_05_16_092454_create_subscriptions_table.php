@@ -17,8 +17,6 @@ return new class extends Migration
             $table->string('name')->nullable();
             $table->string('phone');
             $table->enum('tariff', ['standard', 'premium', 'not_selected'])->default('not_selected');
-            $table->string('check_file_id')->nullable();
-            $table->string('check_file')->nullable();
             $table->enum('status', [
                 'pending',
                 'approved',

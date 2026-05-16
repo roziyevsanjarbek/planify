@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\File;
 use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -155,12 +156,60 @@ class TelegramController extends Controller
             );
 
             // db update
-            Subscription::where('telegram_id', $chatId)
+            $subscription = Subscription::query()
+                ->where('telegram_id', $chatId)
                 ->latest()
-                ->first()
-                ?->update([
-                    'check_file' => 'checks/' . $fileName,
+                ->first();
+
+            if(!$subscription){
+
+                $this->sendMessage(
+                    $chatId,
+                    "Avval tarif tanlang."
+                );
+
+                return;
+            }
+
+            $lastFile = File::query()
+                ->where('subscription_id', $subscription->id)
+                ->latest()
+                ->first();
+
+            // approved bo'lsa qayta yuborolmaydi
+            if($subscription->status === 'approved'){
+
+                $this->sendMessage(
+                    $chatId,
+                    "✅ Sizning obunangiz allaqachon tasdiqlangan."
+                );
+
+                return;
+            }
+
+            if($subscription->status === 'pending' && $lastFile){
+
+                $this->sendMessage(
+                    $chatId,
+                    "⏳ Siz allaqachon chek yuborgansiz.\n\nAdmin tasdiqlashini kuting."
+                );
+
+                return;
+            }
+
+            if($subscription){
+
+                File::query()->create([
+                    'subscription_id' => $subscription->id,
+                    'file_name' => $fileName,
+                    'file_path' => 'checks/' . $fileName,
+                    'status' => 'pending',
                 ]);
+
+                $subscription->update([
+                    'status' => 'pending'
+                ]);
+            }
 
             $this->sendMessage(
                 $chatId,

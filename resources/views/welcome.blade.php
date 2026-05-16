@@ -230,9 +230,7 @@
             </h1>
 
             <p>
-                Planify orqali foydalanuvchilar tarif sotib olishi,
-                to'lov cheklarini yuborishi va admin panel orqali
-                barcha subscriptionlarni boshqarishingiz mumkin.
+                You can send and purchase plans through Planify and manage all subscriptions through the admin panel.
             </p>
 
             <div class="buttons">
@@ -264,8 +262,7 @@
                 <h2>Premium Plan</h2>
 
                 <p>
-                    Telegram bot orqali avtomatik tarif sotish,
-                    admin panel boshqaruvi va to'lov monitoringi.
+                    Automatic tariff sales, admin panel management, and payment monitoring via Telegram bot.
                 </p>
 
             </div>

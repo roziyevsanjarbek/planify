@@ -135,15 +135,16 @@
 
     <div class="logo">
         <h1>Plan<span>ify</span></h1>
-        <p>Admin panelga kirish</p>
+        <p>Login to admin panel</p>
     </div>
 
-    <form>
+    <form id="loginForm">
 
         <div class="form-group">
             <label>Email</label>
             <input
                 type="email"
+                id="email"
                 class="form-control"
                 placeholder="admin@planify.com"
             >
@@ -153,6 +154,7 @@
             <label>Password</label>
             <input
                 type="password"
+                id="password"
                 class="form-control"
                 placeholder="********"
             >
@@ -170,6 +172,81 @@
     </div>
 
 </div>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
 
+    const form = document.getElementById('loginForm');
+
+    form.addEventListener('submit', async function(e){
+
+        e.preventDefault();
+
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        try {
+
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    email,
+                    password
+                })
+            });
+
+            const data = await response.json();
+
+            if(response.ok){
+                // token saqlash
+                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('admin_name', data.user.name);
+
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'success',
+                    title: 'Login successful',
+                    showConfirmButton: false,
+                    timer: 3000
+                });
+                // dashboardga o'tkazish
+                window.location.href = '/dashboard';
+
+
+            } else {
+
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'error',
+                    title: data.message || 'Login failed',
+                    showConfirmButton: false,
+                    timer: 3000
+                });
+
+            }
+
+        } catch(error){
+
+            console.log(error);
+
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'error',
+                title: data.message || 'Server error',
+                showConfirmButton: false,
+                timer: 3000
+            });
+
+        }
+
+    });
+
+</script>
 </body>
 </html>
