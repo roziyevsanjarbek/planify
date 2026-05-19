@@ -13,5 +13,6 @@ class Setting extends Model
         'premium_price',
         'card_number',
         'card_holder',
+        'link',
     ];
 }

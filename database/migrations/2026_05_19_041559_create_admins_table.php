@@ -11,13 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('settings', function (Blueprint $table) {
+        Schema::create('admins', function (Blueprint $table) {
             $table->id();
-            $table->string('standard_price')->nullable();
-            $table->string('premium_price')->nullable();
-            $table->string('card_number')->nullable();
-            $table->string('card_holder')->nullable();
-            $table->string('link')->nullable();
+            $table->string('telegram_id')->unique();
+            $table->string('name')->nullable();
             $table->timestamps();
         });
     }
@@ -27,6 +24,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('settings');
+        Schema::dropIfExists('admins');
     }
 };

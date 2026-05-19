@@ -252,12 +252,20 @@ class TelegramController extends Controller
 
             $setting = Setting::query()->first();
 
+            if(!$setting){
+                $setting = Setting::query()->create([
+                    'standard_price' => 100000,
+                    'premium_price' => 200000,
+                ]);
+            }
+
             $text =
                 "⚙️ BOT SOZLAMALARI\n\n"
                 . "💰 Standard: {$setting->standard_price}\n"
                 . "💎 Premium: {$setting->premium_price}\n\n"
                 . "💳 Karta: {$setting->card_number}\n"
-                . "👤 Egasi: {$setting->card_holder}";
+                . "👤 Egasi: {$setting->card_holder}\n"
+                . "   Guruh: {$setting->link}";
 
             $keyboard = [
                 'inline_keyboard' => [
@@ -283,6 +291,12 @@ class TelegramController extends Controller
                         [
                             'text' => '✏️ Karta egasi',
                             'callback_data' => 'edit_card_holder'
+                        ]
+                    ],
+                    [
+                        [
+                            'text' => '✏️ Link',
+                            'callback_data' => 'edit_link'
                         ]
                     ]
                 ]
@@ -628,6 +642,7 @@ class TelegramController extends Controller
                 'premium_price' => 'Premium Tarif narx',
                 'card_number' => 'Karta raqam',
                 'card_holder' => 'Karta egasi',
+                'link' => 'Link',
             ];
 
             $this->editMessage(
