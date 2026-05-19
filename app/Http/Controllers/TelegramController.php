@@ -7,16 +7,21 @@ use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use App\Models\TelegramState;
+use App\Models\Setting;
 
 class TelegramController extends Controller
 {
     private $token;
     private $apiUrl;
 
+    private $adminId;
+
     public function __construct()
     {
         $this->token = env('TELEGRAM_BOT_TOKEN');
         $this->apiUrl = 'https://api.telegram.org/bot' . $this->token . '/';
+        $this->adminId = env('TELEGRAM_ADMIN_ID');
     }
 
     public function webhook(Request $request)
@@ -44,28 +49,251 @@ class TelegramController extends Controller
 
 
         // /start
-        if (isset($message['text']) && $message['text'] === '/start') {
+        if (
+            isset($message['text']) &&
+            $message['text'] === '/start'
+        ) {
+
+            if ((string)$chatId === (string)$this->adminId) {
+
+                $this->sendMessage(
+                    $chatId,
+                    "Admin botiga xush kelibsiz."
+                );
+
+            } else {
+
+                $keyboard = [
+                    'keyboard' => [
+                        [
+                            [
+                                'text' => '📱 Telefon raqam yuborish',
+                                'request_contact' => true
+                            ]
+                        ]
+                    ],
+                    'resize_keyboard' => true,
+                    'one_time_keyboard' => true
+                ];
+
+                $this->sendMessage(
+                    $chatId,
+                    "Iltimos telefon raqamingizni yuboring:",
+                    $keyboard
+                );
+            }
+        }
+
+        $telegramState = TelegramState::query()
+            ->where('chat_id', $chatId)
+            ->first();
+
+        if (
+            $telegramState &&
+            $telegramState->state &&
+            isset($message['text']) &&
+            $chatId == $this->adminId
+        ) {
+
+            $setting = Setting::query()->first();
+
+            if (!$setting) {
+
+                $setting = Setting::query()->create([
+                    'standard_price' => 100000,
+                    'premium_price' => 200000,
+                ]);
+            }
+
+            $setting->update([
+                $telegramState->state => $message['text']
+            ]);
+
+            $telegramState->update([
+                'state' => null
+            ]);
+
+            $this->sendMessage(
+                $chatId,
+                "✅ Ma'lumot yangilandi."
+            );
+
+            return;
+        }
+
+        if (
+            isset($message['text']) &&
+            str_starts_with($message['text'], '/subscription') &&
+            $chatId == $this->adminId
+        ) {
+
+            $textParts = explode(' ', trim($message['text']));
+
+            $phone = $textParts[1] ?? null;
+
+            $query = Subscription::query()
+                ->with('files')
+                ->latest();
+
+            // telefon yozilgan bo'lsa filter qiladi
+            if ($phone) {
+
+                $query->where('phone', 'like', '%' . $phone . '%');
+            }
+
+            $subscriptions = $query->get();
+
+            if ($subscriptions->isEmpty()) {
+
+                $this->sendMessage(
+                    $chatId,
+                    "❌ Obuna topilmadi."
+                );
+
+                return;
+            }
+
+            foreach ($subscriptions as $subscription) {
+
+                $status = match ($subscription->status) {
+                    'approved' => '✅ Tasdiqlangan',
+                    'rejected' => '❌ Rad etilgan',
+                    default => '⏳ Kutilmoqda',
+                };
+
+                // file bo'lsa
+                if ($subscription->files->count()) {
+
+                    $media = [];
+
+                    foreach ($subscription->files as $index => $file) {
+
+                        $filePath = storage_path(
+                            'app/public/' . $file->file_path
+                        );
+
+                        if (!file_exists($filePath)) {
+                            continue;
+                        }
+
+                        $attachName = 'photo' . $index;
+
+                        $mediaItem = [
+                            'type' => 'photo',
+                            'media' => 'attach://' . $attachName,
+                        ];
+
+                        if ($index === 0) {
+
+                            $mediaItem['caption'] =
+                                "📋 OBUNA MA'LUMOTI\n\n"
+                                . "🆔 ID: {$subscription->id}\n"
+                                . "👤 Ism: {$subscription->name}\n"
+                                . "📞 Telefon: {$subscription->phone}\n"
+                                . "💳 Tarif: {$subscription->tariff}\n"
+                                . "📌 Status: {$status}\n"
+                                . "🕒 Sana: {$subscription->created_at->format('d.m.Y H:i')}";
+                        }
+
+                        $media[] = $mediaItem;
+                    }
+
+                    $request = Http::asMultipart();
+
+                    foreach ($subscription->files as $index => $file) {
+
+                        $filePath = storage_path(
+                            'app/public/' . $file->file_path
+                        );
+
+                        if (!file_exists($filePath)) {
+                            continue;
+                        }
+
+                        $request->attach(
+                            'photo' . $index,
+                            file_get_contents($filePath),
+                            basename($filePath)
+                        );
+                    }
+
+                    $request->post(
+                        $this->apiUrl . 'sendMediaGroup',
+                        [
+                            'chat_id' => $chatId,
+                            'media' => json_encode($media),
+                        ]
+                    );
+
+                } else {
+
+                    $text =
+                        "📋 OBUNA MA'LUMOTI\n\n"
+                        . "🆔 ID: {$subscription->id}\n"
+                        . "👤 Ism: {$subscription->name}\n"
+                        . "📞 Telefon: {$subscription->phone}\n"
+                        . "💳 Tarif: {$subscription->tariff}\n"
+                        . "📌 Status: {$status}\n"
+                        . "🕒 Sana: {$subscription->created_at->format('d.m.Y H:i')}";
+
+                    $this->sendMessage(
+                        $chatId,
+                        $text
+                    );
+                }
+            }
+        }
+
+        if (
+            isset($message['text']) &&
+            $message['text'] === '/settings' &&
+            $chatId == $this->adminId
+        ) {
+
+            $setting = Setting::query()->first();
+
+            $text =
+                "⚙️ BOT SOZLAMALARI\n\n"
+                . "💰 Standard: {$setting->standard_price}\n"
+                . "💎 Premium: {$setting->premium_price}\n\n"
+                . "💳 Karta: {$setting->card_number}\n"
+                . "👤 Egasi: {$setting->card_holder}";
 
             $keyboard = [
-                'keyboard' => [
+                'inline_keyboard' => [
                     [
                         [
-                            'text' => '📱 Telefon raqam yuborish',
-                            'request_contact' => true
+                            'text' => '✏️ Standard narx',
+                            'callback_data' => 'edit_standard_price'
+                        ]
+                    ],
+                    [
+                        [
+                            'text' => '✏️ Premium narx',
+                            'callback_data' => 'edit_premium_price'
+                        ]
+                    ],
+                    [
+                        [
+                            'text' => '✏️ Karta raqam',
+                            'callback_data' => 'edit_card_number'
+                        ]
+                    ],
+                    [
+                        [
+                            'text' => '✏️ Karta egasi',
+                            'callback_data' => 'edit_card_holder'
                         ]
                     ]
-                ],
-                'resize_keyboard' => true,
-                'one_time_keyboard' => true
+                ]
             ];
 
             $this->sendMessage(
                 $chatId,
-                "Iltimos telefon raqamingizni yuboring:",
+                $text,
                 $keyboard
             );
         }
-
         // contact kelganda
         if (isset($message['contact'])) {
 
@@ -103,6 +331,8 @@ class TelegramController extends Controller
                 "Telefon raqamingiz qabul qilindi ✅",
                 $removeKeyboard
             );
+
+
 
             // yangi tarif buttonlarini chiqaradi
             $this->sendMessage(
@@ -215,6 +445,47 @@ class TelegramController extends Controller
                 $chatId,
                 "✅ To'lov cheki qabul qilindi.\n\nAdmin tasdiqlashini kuting."
             );
+
+            $adminText =
+                "🆕 Yangi zayavka!\n\n"
+                . "👤 Ism: {$subscription->name}\n"
+                . "📞 Telefon: {$subscription->phone}\n"
+                . "💳 Tarif: {$subscription->tariff}";
+
+            $keyboard = [
+                'inline_keyboard' => [
+                    [
+                        [
+                            'text' => '❌ Bekor qilish',
+                            'callback_data' => 'rejected_'.$subscription->id
+                        ],
+                        [
+                            'text' => '✅ Tasdiqlash',
+                            'callback_data' => 'approved_'.$subscription->id
+                        ]
+                    ]
+                ]
+            ];
+
+            if (isset($message['photo'])) {
+
+                Http::post($this->apiUrl . 'sendPhoto', [
+                    'chat_id' => $this->adminId,
+                    'photo' => $telegramFileId,
+                    'caption' => $adminText,
+                    'reply_markup' => json_encode($keyboard),
+                ]);
+            }
+
+            if (isset($message['document'])) {
+
+                Http::post($this->apiUrl . 'sendDocument', [
+                    'chat_id' => $this->adminId,
+                    'document' => $telegramFileId,
+                    'caption' => $adminText,
+                    'reply_markup' => json_encode($keyboard),
+                ]);
+            }
         }
     }
 
@@ -224,6 +495,14 @@ class TelegramController extends Controller
         $messageId = $callback['message']['message_id'];
         $data = $callback['data'];
 
+        $dataParts = explode('_', $data);
+
+        $action = $dataParts[0];
+        $subscriptionId = $dataParts[1] ?? null;
+
+        $subscription = Subscription::with('files')
+            ->find($subscriptionId);
+
         if ($data === 'tariff_standard') {
 
             Subscription::query()
@@ -232,9 +511,22 @@ class TelegramController extends Controller
                 ->first()
                 ?->update(['tariff' => 'standard']);
 
-            $text = "Siz Standard tarifni tanladingiz\n"
-            . "Tarif narxi: 100 000 so'm\n"
-            . "Iltimos to'lovni chekini yuboring:";
+            $setting = Setting::query()->first();
+
+            $text =
+                "💼 Siz *Standard* tarifni tanladingiz.\n\n"
+
+                . "💰 Tarif narxi: *{$setting->standard_price} so'm*\n\n"
+
+                . "💳 To'lov uchun karta:\n"
+                . "`{$setting->card_number}`\n\n"
+
+                . "👤 Karta egasi:\n"
+                . "{$setting->card_holder}\n\n"
+
+                . "📸 To'lov qilganingizdan so'ng\n"
+                . "chek rasmini yuboring.";
+
             $this->editMessage($chatId, $messageId, $text);
         }
 
@@ -246,11 +538,105 @@ class TelegramController extends Controller
                 ->first()
                 ?->update(['tariff' => 'premium']);
 
-            $text = "Siz Standard tarifni tanladingiz\n"
-                . "Tarif narxi: 200 000 so'm\n"
-                . "Iltimos to'lovni chekini yuboring:";
+            $setting = Setting::query()->first();
+
+            $text =
+                "💎 Siz *Premium* tarifni tanladingiz.\n\n"
+
+                . "💰 Tarif narxi: *{$setting->premium_price} so'm*\n\n"
+
+                . "💳 To'lov uchun karta:\n"
+                . "`{$setting->card_number}`\n\n"
+
+                . "👤 Karta egasi:\n"
+                . "{$setting->card_holder}\n\n"
+
+                . "📸 To'lov qilganingizdan so'ng\n"
+                . "chek rasmini yuboring.";
+
             $this->editMessage($chatId, $messageId, $text);
         }
+
+        if($action === 'approved' && $subscription){
+
+            $subscription->update([
+                'status' => 'approved'
+            ]);
+            $subscription->files()->update(['status' => 'approve']);
+
+
+            $this->sendMessage(
+                $subscription->telegram_id,
+                "✅ Sizning obunangiz tasdiqlandi."
+            );
+            $caption =
+                "🆕 Yangi zayavka!\n\n"
+                . "👤 Ism: {$subscription->name}\n"
+                . "📞 Telefon: {$subscription->phone}\n"
+                . "💳 Tarif: {$subscription->tariff}\n\n"
+                . "✅ TASDIQLANDI";
+
+            $this->editCaption(
+                $chatId,
+                $messageId,
+                $caption
+            );
+        }
+
+        if($action === 'rejected' && $subscription){
+
+            $subscription->update([
+                'status' => 'rejected'
+            ]);
+
+            $subscription->files()->update(['status' => 'reject']);
+
+            $this->sendMessage(
+                $subscription->telegram_id,
+                "❌ To'lov chekingiz rad etildi.\n\nIltimos qayta yuboring."
+            );
+
+            $caption =
+                "🆕 Yangi zayavka!\n\n"
+                . "👤 Ism: {$subscription->name}\n"
+                . "📞 Telefon: {$subscription->phone}\n"
+                . "💳 Tarif: {$subscription->tariff}\n\n"
+                . "❌ RAD ETILDI";
+
+            $this->editCaption(
+                $chatId,
+                $messageId,
+                $caption
+            );
+        }
+
+        if (str_starts_with($data, 'edit_')) {
+
+            $field = str_replace('edit_', '', $data);
+
+            TelegramState::query()->updateOrCreate(
+                [
+                    'chat_id' => $chatId
+                ],
+                [
+                    'state' => $field
+                ]
+            );
+
+            $fieldNames = [
+                'standard_price' => 'Standard Tarif narx',
+                'premium_price' => 'Premium Tarif narx',
+                'card_number' => 'Karta raqam',
+                'card_holder' => 'Karta egasi',
+            ];
+
+            $this->editMessage(
+                $chatId,
+                $messageId,
+                "✏️ Yangi {$fieldNames[$field]} ni yuboring:"
+            );
+        }
+
     }
 
     public function sendMessage($chatId, $message, $replyMarkup = null)
@@ -273,6 +659,19 @@ class TelegramController extends Controller
             'chat_id' => $chatId,
             'message_id' => $messageId,
             'text' => $message,
+            'parse_mode' => 'Markdown',
+        ]);
+    }
+
+    public function editCaption($chatId, $messageId, $caption)
+    {
+        Http::post($this->apiUrl . 'editMessageCaption', [
+            'chat_id' => $chatId,
+            'message_id' => $messageId,
+            'caption' => $caption,
+            'reply_markup' => json_encode([
+                'inline_keyboard' => []
+            ])
         ]);
     }
 }

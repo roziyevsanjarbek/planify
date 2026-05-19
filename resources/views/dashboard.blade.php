@@ -768,14 +768,6 @@
                                 >
                                     Reject
                                 </button>
-                             <button
-                                class="btn btn-chat"
-                                data-id="${subscription.telegram_id}"
-                                data-name="${subscription.name.replace(/"/g, '&quot;')}"
-                                onclick="openChat(this.dataset.id, this.dataset.name)"
-                            >
-                                Chat
-                            </button>
                             </div>
 
                         </td>
@@ -1086,15 +1078,6 @@
                                 >
                                     Approve
                                 </button>
-
-                                <button
-                                class="btn btn-chat"
-                                data-id="${subscription.telegram_id}"
-                                data-name="${subscription.name.replace(/"/g, '&quot;')}"
-                                onclick="openChat(this.dataset.id, this.dataset.name)"
-                            >
-                                Chat
-                            </button>
 
                             </div>
 
