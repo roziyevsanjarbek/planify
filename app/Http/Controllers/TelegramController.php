@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Admin;
 use App\Models\File;
 use App\Models\Subscription;
 use Illuminate\Http\Request;
@@ -17,11 +18,13 @@ class TelegramController extends Controller
 
     private $adminId;
 
+    private $superAdminId;
+
     public function __construct()
     {
         $this->token = env('TELEGRAM_BOT_TOKEN');
         $this->apiUrl = 'https://api.telegram.org/bot' . $this->token . '/';
-        $this->adminId = env('TELEGRAM_ADMIN_ID');
+        $this->superAdminId = env('TELEGRAM_SUPER_ADMIN_ID');
     }
 
     public function webhook(Request $request)
@@ -54,7 +57,14 @@ class TelegramController extends Controller
             $message['text'] === '/start'
         ) {
 
-            if ((string)$chatId === (string)$this->adminId) {
+            if ($this->hasAdminAccess($chatId)) {
+                $admin = Admin::query()
+                    ->where('telegram_id', $chatId)
+                    ->first();
+
+                $admin?->update([
+                    'name' => $firstName . ' ' . $lastName
+                ]);
 
                 $this->sendMessage(
                     $chatId,
@@ -89,10 +99,84 @@ class TelegramController extends Controller
             ->first();
 
         if (
+            isset($message['users_shared']) &&
+            $this->isSuperAdmin($chatId)
+        ) {
+
+            $users = $message['users_shared']['users'];
+
+            foreach ($users as $user) {
+
+                $telegramId = $user['user_id'];
+
+                $name = $user['first_name'] ?? 'Admin';
+
+                Admin::query()->firstOrCreate(
+                    [
+                        'telegram_id' => $telegramId
+                    ],
+                    [
+                        'name' => $name
+                    ]
+                );
+
+                $removeKeyboard = [
+                    'remove_keyboard' => true
+                ];
+
+                $this->sendMessage(
+                    $chatId,
+                    "✅ {$telegramId} admin qilindi.",
+                    $removeKeyboard
+                );
+            }
+
+            return;
+        }
+
+        if (
+            isset($message['text']) &&
+            $message['text'] === '/admins' &&
+            $this->hasAdminAccess($chatId)
+        ) {
+
+            $admins = Admin::query()->get();
+
+            $text =
+                "👮 ADMINLAR RO‘YXATI\n\n"
+
+                . "👑 Super Admin:\n"
+                . "{$this->superAdminId}\n\n"
+
+                . "👥 Oddiy adminlar:\n";
+
+            if ($admins->isEmpty()) {
+
+                $text .= "Adminlar mavjud emas.";
+            }
+
+            foreach ($admins as $index => $admin) {
+
+                $number = $index + 1;
+
+                $text .=
+                    "{$number}. {$admin->name} - {$admin->telegram_id}\n";
+            }
+
+            $this->sendMessage(
+                $chatId,
+                $text
+            );
+
+            return;
+        }
+
+        if (
             $telegramState &&
             $telegramState->state &&
+            $telegramState->state !== 'add_admin' &&
             isset($message['text']) &&
-            $chatId == $this->adminId
+            $this->hasAdminAccess($chatId)
         ) {
 
             $setting = Setting::query()->first();
@@ -124,7 +208,7 @@ class TelegramController extends Controller
         if (
             isset($message['text']) &&
             str_starts_with($message['text'], '/subscription') &&
-            $chatId == $this->adminId
+            $this->hasAdminAccess($chatId)
         ) {
 
             $textParts = explode(' ', trim($message['text']));
@@ -247,7 +331,7 @@ class TelegramController extends Controller
         if (
             isset($message['text']) &&
             $message['text'] === '/settings' &&
-            $chatId == $this->adminId
+            $this->hasAdminAccess($chatId)
         ) {
 
             $setting = Setting::query()->first();
@@ -301,6 +385,23 @@ class TelegramController extends Controller
                     ]
                 ]
             ];
+
+            if ($this->isSuperAdmin($chatId)) {
+
+                $keyboard['inline_keyboard'][] = [
+                    [
+                        'text' => '➕ Admin qo‘shish',
+                        'callback_data' => 'add_admin'
+                    ]
+                ];
+
+                $keyboard['inline_keyboard'][] = [
+                    [
+                        'text' => '❌ Adminni olib tashlash',
+                        'callback_data' => 'show_delete_admins'
+                    ]
+                ];
+            }
 
             $this->sendMessage(
                 $chatId,
@@ -423,9 +524,12 @@ class TelegramController extends Controller
             // approved bo'lsa qayta yuborolmaydi
             if($subscription->status === 'approved'){
 
+                $setting = Setting::query()->first();
+
                 $this->sendMessage(
                     $chatId,
-                    "✅ Sizning obunangiz allaqachon tasdiqlangan."
+                    "✅ Sizning obunangiz allaqachon tasdiqlangan.\n\n"
+                    . "<a href='{$setting->link}'>📎 Guruhga kirish</a>"
                 );
 
                 return;
@@ -483,22 +587,36 @@ class TelegramController extends Controller
 
             if (isset($message['photo'])) {
 
-                Http::post($this->apiUrl . 'sendPhoto', [
-                    'chat_id' => $this->adminId,
-                    'photo' => $telegramFileId,
-                    'caption' => $adminText,
-                    'reply_markup' => json_encode($keyboard),
-                ]);
+                $admins = Admin::query()->pluck('telegram_id')->toArray();
+
+                $admins[] = $this->superAdminId;
+
+                foreach ($admins as $adminId) {
+
+                    Http::post($this->apiUrl . 'sendPhoto', [
+                        'chat_id' => $adminId,
+                        'photo' => $telegramFileId,
+                        'caption' => $adminText,
+                        'reply_markup' => json_encode($keyboard),
+                    ]);
+                }
             }
 
             if (isset($message['document'])) {
 
-                Http::post($this->apiUrl . 'sendDocument', [
-                    'chat_id' => $this->adminId,
-                    'document' => $telegramFileId,
-                    'caption' => $adminText,
-                    'reply_markup' => json_encode($keyboard),
-                ]);
+                $admins = Admin::query()->pluck('telegram_id')->toArray();
+
+                $admins[] = $this->superAdminId;
+
+                foreach ($admins as $adminId) {
+
+                    Http::post($this->apiUrl . 'sendDocument', [
+                        'chat_id' => $adminId,
+                        'document' => $telegramFileId,
+                        'caption' => $adminText,
+                        'reply_markup' => json_encode($keyboard),
+                    ]);
+                }
             }
         }
     }
@@ -573,15 +691,27 @@ class TelegramController extends Controller
 
         if($action === 'approved' && $subscription){
 
+            if ($subscription->status !== 'pending') {
+
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    "❌ Bu zayavka allaqachon ko‘rib chiqilgan."
+                );
+
+                return;
+            }
+
             $subscription->update([
                 'status' => 'approved'
             ]);
             $subscription->files()->update(['status' => 'approve']);
 
-
+            $setting = Setting::query()->first();
             $this->sendMessage(
                 $subscription->telegram_id,
-                "✅ Sizning obunangiz tasdiqlandi."
+                "✅ Sizning obunangiz tasdiqlandi.\n\n"
+                . "{$setting->link}"
             );
             $caption =
                 "🆕 Yangi zayavka!\n\n"
@@ -598,6 +728,17 @@ class TelegramController extends Controller
         }
 
         if($action === 'rejected' && $subscription){
+
+            if ($subscription->status !== 'pending') {
+
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    "❌ Bu zayavka allaqachon ko‘rib chiqilgan."
+                );
+
+                return;
+            }
 
             $subscription->update([
                 'status' => 'rejected'
@@ -622,6 +763,63 @@ class TelegramController extends Controller
                 $messageId,
                 $caption
             );
+        }
+
+        if ($data === 'add_admin') {
+
+            $keyboard = [
+                'keyboard' => [
+                    [
+                        [
+                            'text' => '👤 Foydalanuvchi tanlash',
+                            'request_users' => [
+                                'request_id' => 1,
+                                'user_is_bot' => false,
+                                'max_quantity' => 1
+                            ]
+                        ]
+                    ]
+                ],
+                'resize_keyboard' => true,
+                'one_time_keyboard' => true
+            ];
+
+            $this->sendMessage(
+                $chatId,
+                "👤 Admin qilinadigan foydalanuvchini tanlang:",
+                $keyboard
+            );
+
+            return;
+        }
+
+        if (str_starts_with($data, 'delete_admin_')) {
+
+            $adminId = str_replace('delete_admin_', '', $data);
+
+            $admin = Admin::query()->find($adminId);
+
+            if (!$admin) {
+
+                $this->sendMessage(
+                    $chatId,
+                    "❌ Admin topilmadi."
+                );
+
+                return;
+            }
+
+            $name = $admin->name;
+
+            $admin->delete();
+
+            $this->editMessage(
+                $chatId,
+                $messageId,
+                "✅ {$name} adminlikdan olindi."
+            );
+
+            return;
         }
 
         if (str_starts_with($data, 'edit_')) {
@@ -652,6 +850,24 @@ class TelegramController extends Controller
             );
         }
 
+
+    }
+
+    private function isSuperAdmin($chatId): bool
+    {
+        return (string)$chatId === (string)$this->superAdminId;
+    }
+
+    private function isAdmin($chatId): bool
+    {
+        return Admin::query()
+            ->where('telegram_id', $chatId)
+            ->exists();
+    }
+
+    private function hasAdminAccess($chatId): bool
+    {
+        return $this->isSuperAdmin($chatId) || $this->isAdmin($chatId);
     }
 
     public function sendMessage($chatId, $message, $replyMarkup = null)
